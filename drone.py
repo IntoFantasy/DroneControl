@@ -5,6 +5,8 @@ from config import Config
 import matplotlib.pyplot as plt
 import sympy
 
+color_list = ['blue', 'lightgreen', 'purple', 'yellow', 'brown', 'pink', 'orange', 'red', 'black']
+
 
 class Drone:
     def __init__(self, theta, distance, ID=-1):
@@ -100,10 +102,13 @@ class DroneGroupCircle:
         self.followDrone = number
         for i, theta in enumerate(np.linspace(0, 2 * math.pi, number + 1)[:-1]):
             self.IdealDroneGroup.append(Drone(theta, self.R, i))
+        self.Loss = [self.loss()]
+        self.droneTraceAngle = [[theta] for theta in initialAngle]
+        self.droneTraceRadius = [[d] for d in initialRadius]
 
     def SenderChosenRandom(self, number):
         self.SenderID = sorted(random.sample(range(9), number))
-        print("SenderID:", self.SenderID)
+        # print("SenderID:", self.SenderID)
 
     def SimulateDroneControl(self, number):
         for _ in range(Config.epoch):
@@ -116,16 +121,42 @@ class DroneGroupCircle:
                                            self.IdealDroneGroup[self.SenderID[0]])
                     beta = angleCalculate(Drone(self.realPositionAngle[droneID], self.realPositionRadius[droneID]),
                                           self.IdealDroneGroup[self.SenderID[1]])
-                    realPosition = PositionCalculate(alpha, beta, self.IdealDroneGroup[self.SenderID[0]],
-                                                     self.IdealDroneGroup[self.SenderID[1]],
-                                                     self.IdealDroneGroup[droneID])
-                    realTheta, realRadius = XYToPolar(realPosition[0], realPosition[1])
+                    gamma = angleCalculate(Drone(self.realPositionAngle[droneID], self.realPositionRadius[droneID]),
+                                           self.IdealDroneGroup[self.SenderID[2]])
+                    realPosition1 = PositionCalculate(alpha, beta, self.IdealDroneGroup[self.SenderID[0]],
+                                                      self.IdealDroneGroup[self.SenderID[1]],
+                                                      self.IdealDroneGroup[droneID])
+                    realTheta1, realRadius1 = XYToPolar(realPosition1[0], realPosition1[1])
+                    realPosition2 = PositionCalculate(alpha, gamma, self.IdealDroneGroup[self.SenderID[0]],
+                                                      self.IdealDroneGroup[self.SenderID[2]],
+                                                      self.IdealDroneGroup[droneID])
+                    realTheta2, realRadius2 = XYToPolar(realPosition2[0], realPosition2[1])
+                    realPosition3 = PositionCalculate(beta, gamma, self.IdealDroneGroup[self.SenderID[1]],
+                                                      self.IdealDroneGroup[self.SenderID[2]],
+                                                      self.IdealDroneGroup[droneID])
+                    realTheta3, realRadius3 = XYToPolar(realPosition3[0], realPosition3[1])
+                    if droneID == 0:
+                        realTheta = 0
+                    else:
+                        realTheta = (realTheta1 + realTheta2 + realTheta3) / 3
+                    realRadius = (realRadius1 + realRadius2 + realRadius3) / 3
                     # print("realTheta:", realTheta, "realR:", realRadius)
+                    if droneID == 0:
+                        if realTheta > math.pi:
+                            self.realPositionAngle[droneID] = self.realPositionAngle[droneID] \
+                                                              + Config.ChangeRateAngle * (math.pi * 2 - realTheta)
+                        else:
+                            self.realPositionAngle[droneID] = self.realPositionAngle[droneID] \
+                                                              + Config.ChangeRateAngle * (0 - realTheta)
+                    else:
+                        self.realPositionAngle[droneID] = self.realPositionAngle[droneID] + Config.ChangeRateAngle \
+                                                          * (self.IdealDroneGroup[droneID].theta - realTheta)
 
-                    self.realPositionAngle[droneID] = Config.ChangeRateAngle * self.IdealDroneGroup[droneID].theta \
-                                                      + (1 - Config.ChangeRateAngle) * realTheta
-                    self.realPositionRadius[droneID] = Config.ChangeRateRadius * self.IdealDroneGroup[droneID].distance \
-                                                       + (1 - Config.ChangeRateRadius) * realRadius
+                    self.realPositionRadius[droneID] = self.realPositionRadius[droneID] + Config.ChangeRateRadius \
+                                                       * (self.IdealDroneGroup[droneID].distance - realRadius)
+                    self.droneTraceAngle[droneID].append(self.realPositionAngle[droneID])
+                    self.droneTraceRadius[droneID].append(self.realPositionRadius[droneID])
+            self.Loss.append(self.loss())
 
     def PrintPosition(self):
         print(self.realPositionAngle)
@@ -138,18 +169,47 @@ class DroneGroupCircle:
 
     def ShowIdealPosition(self, color='red', size=20):
         plt.subplot(polar=True)
-        plt.scatter([i.theta for i in self.IdealDroneGroup], [i.distance for i in self.IdealDroneGroup], s=size, c=color)
+        plt.scatter([i.theta for i in self.IdealDroneGroup], [i.distance for i in self.IdealDroneGroup], s=size,
+                    c=color)
         # plt.show()
+
+    def ShowDroneTrace(self):
+        plt.subplot(polar=True)
+        for i in range(self.followDrone):
+            plt.plot(self.droneTraceAngle[i], self.droneTraceRadius[i], c=color_list[i])
+
+    def loss(self):
+        loss = 0
+        for i in range(self.followDrone):
+            loss += self.realPositionRadius[i] ** 2 + self.IdealDroneGroup[i].distance ** 2 \
+                    - 2 * self.realPositionRadius[i] * self.IdealDroneGroup[i].distance \
+                    * math.cos(self.realPositionAngle[i] - self.IdealDroneGroup[i].theta)
+        return loss
+
+    def ShowLoss(self):
+        plt.plot([i for i in range(Config.epoch + 1)], self.Loss, "--")
+        plt.show()
 
 
 Theta = [0, 40.10, 80.21, 119.75, 159.75, 199.96, 240.07, 280.17, 320.28]
 Theta_ = [angle / 180 * math.pi for angle in Theta]
 length = [100, 98, 112, 105, 98, 112, 105, 98, 112]
-testDrone = DroneGroupCircle(9, Theta_, length)
-testDrone.ShowPosition('green', 20)
-testDrone.ShowIdealPosition('red', 15)
-testDrone.SimulateDroneControl(2)
-testDrone.ShowPosition('pink', 10)
-plt.show()
-# testDrone.PrintPosition()
-# print(angleCalculate(Drone(0, 100), Drone(8/9 * math.pi, 100)))
+idealTheta = np.linspace(0, 2 * math.pi, 10)[:-1]
+X = []
+Y = []
+for i in range(9):
+    x, y = polarToXY(idealTheta[i], 100)
+    X.append(x)
+    Y.append(y)
+print(X)
+print(Y)
+# testDrone = DroneGroupCircle(9, Theta_, length)
+# testDrone.ShowPosition('green', 20)
+# testDrone.ShowIdealPosition('red', 15)
+# testDrone.SimulateDroneControl(3)
+# testDrone.ShowPosition('pink', 10)
+# testDrone.ShowDroneTrace()
+# plt.clim(90, 120)
+# plt.show()
+# testDrone.ShowLoss()
+# print(testDrone.Loss[0], testDrone.Loss[-1])
